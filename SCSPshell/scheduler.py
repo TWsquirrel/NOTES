@@ -1,20 +1,20 @@
-from __future__ import print_function
-import multiprocessing
-try:
+from __future__ import print_function   ## 讓 Python 2 也用到 Python 3 的 print() 函式語法（相容性）
+import multiprocessing  ## 用多製程而非多執行緒來平行工作
+try:    ## 兼容 Py3（queue）與 Py2（Queue 模組）的佇列名稱
 	#PYTHON 3+
 	import queue
 except ImportError:
 	import Queue as queue
-import time
-import datetime
-import sys
-import traceback
-import signal
-import os
-import itertools
-import logging
-try: #PACKAGE psutil
-	import psutil
+import time ## 暫停（sleep()）、時間戳、效能計時
+import datetime ## 日期、時間、時間差物件
+import sys  ## 存取直譯器相關資訊、輸出錯誤、退出程式
+import traceback ## 取得完整的錯誤堆疊字串
+import signal ## 處理系統訊號（SIGINT、SIGTERM…）
+import os ## 作業系統互動（kill process、環境變數、終端大小）
+import itertools ## 高效迭代器工具（count, cycle, groupby…）
+import logging ## 統一日誌系統，支援等級、handler、格式
+try: #PACKAGE psutil     ##
+	import psutil 
 	USE_PSUTIL = True
 except ImportError:
 	USE_PSUTIL = False
