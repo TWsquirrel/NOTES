@@ -1,17 +1,17 @@
-from __future__ import print_function
-import traceback
-import logging
-import os
-import glob
-import fnmatch
+from __future__ import print_function ## 啟用 Python 3 的 print() 函數，即使程式在 Python 2 環境下也能使用
+import traceback ## 引入 Python 的追蹤模組，用於捕捉和顯示異常（Exception）信息 ，在程式出現錯誤時，方便打印堆疊訊息，便於除錯
+import logging ## 引入日誌模組，用於記錄程式運行狀態、錯誤信息或調試信息
+import os 
+import glob ## 提供文件名匹配功能，類似 Linux 的 ls *.txt ，快速查找符合模式的檔案
+import fnmatch ## 用於匹配文件名稱的模式（支持 *、? 等通配符），快速查找符合模式的檔案
 import pickle
 import collections
-import gzip
+import gzip ## 支持 gzip 壓縮格式的文件讀寫，讀寫壓縮檔案，節省空間
 import contextlib
 import dill as pickle
 #import pickle
 import scsp_shell.settings.shell_settings
-
+## 引入 SCSPShell 中不同容器模組，通常對應不同數據或邏輯模組
 import scsp_shell.container.cell
 import scsp_shell.container.dual_cell
 import scsp_shell.container.value
@@ -21,7 +21,7 @@ import scsp_shell.container.report
 import scsp_shell.container.design
 import scsp_shell.container.model_1tf
 import scsp_shell.container.model_2tf
-
+## 引入 SCSPShell 的子程式工具
 import scsp_shell.subprogram.command_scheduler
 import scsp_shell.subprogram.task_manager
 import scsp_shell.version_control
@@ -30,7 +30,7 @@ import scsp_shell.pattern_analyzer
 import scsp_shell.data_analyzer
 import scsp_shell.udfm_generator
 import scsp_shell.ctm_generator
-
+## 引入命令基類和模組類，啟動或操作整個 shell 系統
 from scsp_shell.cmdshell.command import BaseCommand, CmdModule
 from scsp_shell.cmdshell.cmdshell import CmdShell
 
@@ -170,20 +170,21 @@ class ScspShell(CmdShell, CmdModule):
     
 	def _command_clean_spice(self):
 		command = BaseCommand('clean_spice', self.clean_spice)
-		command.set_description('')
+		command.set_description('clean .mt & .ms files')
 		command.parser.add_argument(
 			'folder', type=str, nargs='?', default=None,
 			help='clean .mt & .ms files'
 		)
 		return command
-
-    def clean_spice(self, args):
- 		if args.folder:
+	
+	def clean_spice(self, args):
+		if args.folder:
 			target_path = os.path.join(self.root_path, "database", args.folder)
 		else:
 			target_path = os.path.join(self.root_path, "database")
-	
+		
 		delete_spice_files(target_path, logger=logger, log_level=_msg_lvl)
+
 
 
 
