@@ -13,33 +13,34 @@ import signal ## 處理系統訊號（SIGINT、SIGTERM…）
 import os ## 作業系統互動（kill process、環境變數、終端大小）
 import itertools ## 高效迭代器工具（count, cycle, groupby…）
 import logging ## 統一日誌系統，支援等級、handler、格式
-try: #PACKAGE psutil     ##
+try: #PACKAGE psutil     ## 若裝了 psutil，就能「連同子製程」一起殺掉；否則用較粗暴的 os.kill()
 	import psutil 
 	USE_PSUTIL = True
 except ImportError:
 	USE_PSUTIL = False
 
 _msg_lvl = 25
-logging.addLevelName(_msg_lvl, "MESSAGE")
-logger = logging.getLogger(__name__)
+logging.addLevelName(_msg_lvl, "MESSAGE")   ## 自訂一個介於 INFO(20) 與 WARNING(30) 間的層級，名稱叫 "MESSAGE"
+logger = logging.getLogger(__name__)    ## 取得以模組名命名的 logger
 
 #for python 2.6
+## 在沒有 timedelta.total_seconds() 的舊版 Python 手動計算秒數（含微秒）
 def _timedelta_total_seconds(timedelta):
 	return (
 		timedelta.microseconds + 0.0 +
 		(timedelta.seconds + timedelta.days * 24 * 3600) * 10 ** 6) / 10 ** 6
 
 def _process(info, process_id, program_order):
-	while info.keep_running.value == 1: #for SIGTERM, let current job finish
-		for program in program_order:
+	while info.keep_running.value == 1: #for SIGTERM, let current job finish ## 子製程的主函式。keep_running 是 multiprocessing.Value('I',1)，=1 表示繼續跑。
+		for program in program_order:   ## 依照 program_order（此執行緒允許處理的「程序名」優先序）嘗試從對應的 multiprocessing.Queue 非阻塞取一個任務；取到就記下 current_program 並跳出。
 			try:
 				current_task = info.queue_list[program].get(False)
 				current_program = program
 				break
 			except queue.Empty:
 				continue
-		else: #Nothing to do
-			#Trap for detailed check
+		else: #Nothing to do ## for-else 的 else 代表「沒有 break」，即這個工作者沒有在任何佇列拿到任務
+			#Trap for detailed check    ## 先將 untrapped_count 減一：代表這個工作者「陷入等待」。接著 wait() 在 detailed_check_event 上（事件被清掉時會阻塞）。被喚醒後再把 untrapped_count 加回來。
 			with info.untrapped_count.get_lock():
 				info.untrapped_count.value -= 1
 			logging.debug('{0} trapped in roughed check. Remaining process: {1}'.format(
