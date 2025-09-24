@@ -1,3 +1,6 @@
+"""
+匯入與相容層
+"""
 from __future__ import print_function   ## 讓 Python 2 也用到 Python 3 的 print() 函式語法（相容性）
 import multiprocessing  ## 用多製程而非多執行緒來平行工作
 try:    ## 兼容 Py3（queue）與 Py2（Queue 模組）的佇列名稱
@@ -19,10 +22,18 @@ try: #PACKAGE psutil     ## 若裝了 psutil，就能「連同子製程」一起
 except ImportError:
 	USE_PSUTIL = False
 
+"""
+日誌設定
+Python 內建等級：DEBUG(10) < INFO(20) < WARNING(30) < ERROR(40) < CRITICAL(50)
+預設等級是 WARNING(30)，沒有使用logger.setLevel(logging.DEBUG)之類設定，低於30的log不會輸出
+""" 
 _msg_lvl = 25
 logging.addLevelName(_msg_lvl, "MESSAGE")   ## 自訂一個介於 INFO(20) 與 WARNING(30) 間的層級，名稱叫 "MESSAGE"
-logger = logging.getLogger(__name__)    ## 取得以模組名命名的 logger
+logger = logging.getLogger(__name__)    ## 取得以模組名命名的 logger ，此處__name__就會是scheduler
 
+"""
+_timedelta_total_seconds()
+"""
 #for python 2.6
 ## 在沒有 timedelta.total_seconds() 的舊版 Python 手動計算秒數（含微秒）
 def _timedelta_total_seconds(timedelta):
@@ -30,6 +41,9 @@ def _timedelta_total_seconds(timedelta):
 		timedelta.microseconds + 0.0 +
 		(timedelta.seconds + timedelta.days * 24 * 3600) * 10 ** 6) / 10 ** 6
 
+"""
+工作者主迴圈
+"""
 def _process(info, process_id, program_order):
 	while info.keep_running.value == 1: #for SIGTERM, let current job finish ## 子製程的主函式。keep_running 是 multiprocessing.Value('I',1)，=1 表示繼續跑。
 		for program in program_order:   ## 依照 program_order（此執行緒允許處理的「程序名」優先序）嘗試從對應的 multiprocessing.Queue 非阻塞取一個任務；取到就記下 current_program 並跳出。
@@ -99,14 +113,22 @@ def _process(info, process_id, program_order):
 			process_id,current_program,current_task,info.completed_task_count[program].value))
 		with info.completed_task_count[program].get_lock():
 			info.completed_task_count[program].value += 1
-
+"""
+Info 容器
+"""
 class Info(object): pass
 
+"""
+Scheduler 類別（公共 API）
+"""
 class Scheduler(object):
 	# Make this instance picklable, these variables are static member
 	#_thread_list = [] #process object, reconstruct after join()
 	#_thread_pid = [] #record the pid after start()
 	#_info = Info()
+	'''
+	建構與訊號綁定
+	'''
 	def __init__(self):
 		super(Scheduler,self).__init__()
 		signal.signal(signal.SIGINT, self.kill)
@@ -133,39 +155,63 @@ class Scheduler(object):
 		self._info.untrapped_count = multiprocessing.Value('I',0)
 		self._thread_affinity = [] #record the program order
 		self._total_task_count = {}
-
-	def assign_program(self, program_list):
+    
+    '''
+	註冊任務型別（program）與對應函式；為每個 program 建 queue 與完成計數器
+	'''
+    def assign_program(self, program_list):
 		self._info.program_list = program_list
 		self._info.queue_list = {}
 		for program in program_list:
 			self._info.queue_list[program] = multiprocessing.Queue()
 			self._info.completed_task_count[program] = multiprocessing.Value('I',0)
 
+    '''
+	註冊共享物件（如 DB 連線資訊、設定、路徑），工作者會透過 common_obj 取得
+	'''
 	def assign_common_obj(self, obj):
 		self._info.common_obj = obj
 
+    '''
+	把初始任務投入對應 program 的佇列
+	'''
 	def issue_task(self, program, task_list):
 		for task in task_list:
 			self._info.queue_list[program].put(task)
 
+    '''
+	
+	'''
 	def clear_task(self, program=None):
 		assert not self.is_running(), 'clear_task() should be called without running.'
 		for program in [program] if program else self._info.program_list:
 			while not self._info.queue_list[program].empty():
 				self._info.queue_list[program].get()
 
+    '''
+	
+	'''
 	def is_done(self):
 		for program in self._info.program_list:
 			if not self._info.queue_list[program].empty():
 				return False
 		return True
 
+    '''
+	
+	'''
 	def add_lock(self, name):
 		self._info.lock_list[name] = multiprocessing.Lock()
 
+    '''
+	
+	'''
 	def add_total_task(self, program, count):
 		self._total_task_count[program] = count
 
+    '''
+	
+	'''
 	def clear_total_task(self, program=None):
 		for program in [program] if program else self._info.program_list:
 			self._info.completed_task_count[program] = multiprocessing.Value('I',0)
@@ -174,6 +220,9 @@ class Scheduler(object):
 			except KeyError:
 				pass
 
+    '''
+	新增一個工作者（子製程），設定它可處理的 program 集合與優先序
+	'''
 	def add_thread(self, program_order):
 		program_order = program_order[:]
 		program_order.reverse()
@@ -183,11 +232,17 @@ class Scheduler(object):
 				self._info, thread_id, program_order)))
 		self._thread_affinity.append(program_order)
 
+    '''
+	
+	'''
 	def clear_thread(self):
 		assert not self.is_running(), 'clear_thread() should be called without running.'
 		self._thread_list[:] = []
 		self._thread_affinity[:] = []
 
+    '''
+	啟動尚未 start 的工作者；第一次啟動會記錄 start_time 與把 end_time 設為 -1（執行/暫停中）
+	'''
 	def run(self):
 		if self._info.start_time is None:
 			self._info.start_time = datetime.datetime.now()
@@ -201,12 +256,18 @@ class Scheduler(object):
 				thread.start()
 				self._thread_pid.append(thread.pid)
 
+    '''
+	
+	'''
 	def is_running(self):
 		for thread in self._thread_list:
 			if thread.is_alive():
 				return True
 		return False
 
+    '''
+	等待子製程結束；已結束的工作者會被重建成新的 Process 物件（方便之後再 run()）
+	'''
 	def join(self, timeout = None):
 		for thread_id in range(len(self._thread_list)):
 			#To avoid the multiprocessing package assertion failed.
@@ -237,6 +298,9 @@ class Scheduler(object):
 			else:
 				logger.info('Scheduler is not running.')
 
+    '''
+	
+	'''
 	def kill(self, signum = signal.SIGINT, frame = None):
 		logger.info('Kill scheduler')
 		if USE_PSUTIL:
@@ -257,6 +321,9 @@ Killing the processes may not be properly handeled.''')
 		logger.info('Kill main process')
 		exit(signal.SIGINT)
 
+    '''
+	
+	'''
 	def terminate(self, signum = signal.SIGTERM, frame = None):
 		logger.info('Terminate scheduler, waiting for all running jobs to finish.')
 		self._info.keep_running.value = 0
@@ -266,6 +333,9 @@ Killing the processes may not be properly handeled.''')
 		self._info.keep_running.value = 1
 		logger.info('Terminate successfully.')
 
+    '''
+	
+	'''
 	def status(self, program_order = None, show_affinity = False):
 		if self._info.start_time:
 			seconds=int(_timedelta_total_seconds(datetime.datetime.now()-self._info.start_time))
