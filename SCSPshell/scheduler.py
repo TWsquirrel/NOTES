@@ -43,33 +43,53 @@ def _timedelta_total_seconds(timedelta):
 
 """
 工作者主迴圈
+1.去各個任務佇列裡抓工作。
+2.如果抓到，就執行，並把產生的新任務放回去。
+3.如果所有佇列都空 → 進入「檢查模式」，看看是不是整個工作都做完了。
+4.如果真的沒任務了 → 記錄時間，然後結束。
+5.如果還有任務 → 繼續 loop。
 """
 def _process(info, process_id, program_order):
+	## info: 共享狀態容器（queues/locks/counters/events/... 都在裡面）
+    ## process_id: 這個子製程的 ID（用於日誌辨識）
+    ## program_order: 這個子製程允許處理的 program 名稱清單（有優先序）
+	
 	while info.keep_running.value == 1: #for SIGTERM, let current job finish ## 子製程的主函式。keep_running 是 multiprocessing.Value('I',1)，=1 表示繼續跑。
 		for program in program_order:   ## 依照 program_order（此執行緒允許處理的「程序名」優先序）嘗試從對應的 multiprocessing.Queue 非阻塞取一個任務；取到就記下 current_program 並跳出。
 			try:
-				current_task = info.queue_list[program].get(False)
-				current_program = program
-				break
-			except queue.Empty:
+				current_task = info.queue_list[program].get(False)   # 從對應 program 的 multiprocessing.Queue 非阻塞 get()
+				current_program = program   # 記住這次拿到任務的 program 名稱
+				break  # 取到任務就跳出 for 迴圈
+			except queue.Empty:  # 這個 program 的佇列是空的 → 試下一個 program
 				continue
 		else: #Nothing to do ## for-else 的 else 代表「沒有 break」，即這個工作者沒有在任何佇列拿到任務
 			#Trap for detailed check    ## 先將 untrapped_count 減一：代表這個工作者「陷入等待」。接著 wait() 在 detailed_check_event 上（事件被清掉時會阻塞）。被喚醒後再把 untrapped_count 加回來。
 			with info.untrapped_count.get_lock():
 				info.untrapped_count.value -= 1
+			# 標記「我先暫時陷入等待」，untrapped_count--（用 get_lock() 確保跨製程安全）
+				
 			logging.debug('{0} trapped in roughed check. Remaining process: {1}'.format(
 				process_id,info.untrapped_count.value))
-			info.detailed_check_event.wait()
+			 # 紀錄目前還有多少同伴沒進入等待
+
+			info.detailed_check_event.wait()   
+			 # 等待事件（Event）被 set。若前面別人 clear 了，就會在這裡阻塞；
+			 
 			with info.untrapped_count.get_lock():
 				info.untrapped_count.value += 1
+            # 被喚醒後，把自己從「等待」狀態移除（untrapped_count++）
+				
 			logging.debug('{0} untrapped from roughed check. Remaining process: {1}'.format(
 				process_id,info.untrapped_count.value))
+			
 			for program in info.program_list:
 				if not info.queue_list[program].empty():
 					break
-			else:
+			else:   # 粗略再看一輪所有佇列，如果仍然看起來都空 → 進入「詳細檢查」區段
 				with info.untrapped_count.get_lock():
 					info.untrapped_count.value -= 1
+				# 先把自己再次標記為等待（避免與詳細檢查內的同步邏輯打架）
+				
 				#Detailed check
 				logging.debug('{0} detailed check. Remaining process: {1}'.format(
 					process_id,info.untrapped_count.value))
